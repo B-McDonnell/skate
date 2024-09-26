@@ -220,13 +220,27 @@ func formatDbs(dbs []string) []string {
 	return out
 }
 
+// getAppDataDir: get the user-scoped data directory for charm (e.g.
+// "~/.local/share/charm")
+//
+// This is an unnamed function to allow for mocking
+var getAppDataDir = func() (string, error) {
+	scope := gap.NewScope(gap.User, "charm")
+	dir, err := scope.DataPath("")
+	if err != nil {
+		return "", err
+	}
+
+	return dir, nil
+}
+
 // getFilePath: get the file path to the skate databases.
 func getFilePath(args ...string) (string, error) {
-	scope := gap.NewScope(gap.User, "charm")
-	dd, pathErr := scope.DataPath("")
-	if pathErr != nil {
-		return "", pathErr
+	dd, err := getAppDataDir()
+	if err != nil {
+		return "", err
 	}
+
 	dir := filepath.Join(dd, "kv")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
