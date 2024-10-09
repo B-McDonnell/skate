@@ -49,23 +49,59 @@ var (
 		Use:   "set KEY[@DB] VALUE",
 		Short: "Set a value for a key with an optional @ db.",
 		Args:  cobra.RangeArgs(1, 2),
-		RunE:  set,
-	}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, n, err := keyParser(args[0])
+			if err != nil {
+				return err
+			}
 
+			var v []byte
+			if len(args) == 2 {
+				v = []byte(args[1])
+			} else {
+				v, err = io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+			}
+
+			return set(n, k, v)
+		},
+	}
 	getCmd = &cobra.Command{
 		Use:           "get KEY[@DB]",
 		Short:         "Get a value for a key with an optional @ db.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.ExactArgs(1),
-		RunE:          get,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, n, err := keyParser(args[0])
+			if err != nil {
+				return err
+			}
+
+			v, err := get(n, k)
+			if err != nil {
+				return err
+			}
+
+			printFromKV("%s", v)
+			return nil
+		},
 	}
 
 	deleteCmd = &cobra.Command{
 		Use:   "delete KEY[@DB]",
 		Short: "Delete a key with an optional @ db.",
 		Args:  cobra.ExactArgs(1),
-		RunE:  del,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, n, err := keyParser(args[0])
+			if err != nil {
+				return err
+			}
+
+			return del(n, k)
+		},
 	}
 
 	listCmd = &cobra.Command{
@@ -119,68 +155,47 @@ func (err errDBNotFound) Error() string {
 	return fmt.Sprintf("did you mean %q", strings.Join(err.suggestions, ", "))
 }
 
-func set(cmd *cobra.Command, args []string) error {
-	k, n, err := keyParser(args[0])
-	if err != nil {
-		return err
-	}
-	db, err := openKV(n)
+func set(name string, key, value []byte) error {
+	db, err := openKV(name)
 	if err != nil {
 		return err
 	}
 	defer db.Close() //nolint:errcheck
-	if len(args) == 2 {
-		return wrap(db, false, func(tx *badger.Txn) error {
-			return tx.Set(k, []byte(args[1]))
-		})
-	}
-	bts, err := io.ReadAll(cmd.InOrStdin())
-	if err != nil {
-		return err
-	}
 	return wrap(db, false, func(tx *badger.Txn) error {
-		return tx.Set(k, bts)
+		return tx.Set(key, value)
 	})
 }
 
-func get(_ *cobra.Command, args []string) error {
-	k, n, err := keyParser(args[0])
+func get(name string, key []byte) ([]byte, error) {
+	db, err := openKV(name)
 	if err != nil {
-		return err
-	}
-	db, err := openKV(n)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.Close() //nolint:errcheck
 	var v []byte
 	if err := wrap(db, true, func(tx *badger.Txn) error {
-		item, err := tx.Get(k)
+		item, err := tx.Get(key)
 		if err != nil {
 			return err
 		}
 		v, err = item.ValueCopy(nil)
 		return err
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	printFromKV("%s", v)
-	return nil
+
+	return v, nil
 }
 
-func del(_ *cobra.Command, args []string) error {
-	k, n, err := keyParser(args[0])
-	if err != nil {
-		return err
-	}
-	db, err := openKV(n)
+func del(name string, key []byte) error {
+	db, err := openKV(name)
 	if err != nil {
 		return err
 	}
 	defer db.Close() //nolint:errcheck
 
 	return wrap(db, false, func(tx *badger.Txn) error {
-		return tx.Delete(k)
+		return tx.Delete(key)
 	})
 }
 
